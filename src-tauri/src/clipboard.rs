@@ -321,6 +321,21 @@ fn on_clipboard_change() {
             }
         }
 
+        // Fallback: extract source URL from HTML fragment's <img src="...">
+        if content.source_url.is_none() {
+            if let Some(ref html) = content.html {
+                if let Some(pos) = html.find("src=\"") {
+                    let start = pos + 5;
+                    if let Some(end) = html[start..].find('"') {
+                        let src = &html[start..start + end];
+                        if src.starts_with("http://") || src.starts_with("https://") {
+                            content.source_url = Some(src.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
         // If text is a URL but no source_url from CF_HTML, use the text itself
         if content.source_url.is_none() {
             if let Some(ref t) = content.text {
@@ -329,6 +344,31 @@ fn on_clipboard_change() {
                     && !trimmed.contains('\n')
                 {
                     content.source_url = Some(trimmed.to_string());
+                }
+            }
+        }
+
+        // Browser "Copy Image": clipboard has both image data AND text that is
+        // just an image URL → store as image entry, not text
+        if content.image.is_some() {
+            if let Some(ref t) = content.text {
+                let trimmed = t.trim();
+                if !trimmed.contains('\n')
+                    && (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+                {
+                    let path_lower = trimmed.split('?').next().unwrap_or(trimmed).to_lowercase();
+                    let is_image_url = [
+                        ".jpg", ".jpeg", ".png", ".webp", ".gif",
+                        ".bmp", ".svg", ".ico", ".avif", ".tiff",
+                    ]
+                    .iter()
+                    .any(|ext| path_lower.ends_with(ext));
+                    if is_image_url {
+                        if content.source_url.is_none() {
+                            content.source_url = Some(trimmed.to_string());
+                        }
+                        content.text = None;
+                    }
                 }
             }
         }
@@ -575,10 +615,8 @@ fn read_clipboard_content() -> ClipboardContent {
             }
         }
 
-        // --- Read image (only if no usable text) ---
-        if result.text.as_ref().map_or(true, |t| t.trim().is_empty()) {
-            result.image = try_read_clipboard_image();
-        }
+        // --- Always read image data ---
+        result.image = try_read_clipboard_image();
 
         let _ = CloseClipboard();
     }

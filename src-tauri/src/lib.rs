@@ -112,13 +112,24 @@ pub fn run() {
             let config_path = AppConfig::config_file_path(&default_data_dir);
             let mut cfg = AppConfig::load(&config_path);
 
+            let mut need_save = false;
             if cfg.data_path.is_empty() {
                 cfg.data_path = default_data_dir.to_string_lossy().to_string();
-                cfg.save(&config_path);
+                need_save = true;
             }
 
-            let data_dir = std::path::PathBuf::from(&cfg.data_path);
-            std::fs::create_dir_all(&data_dir)?;
+            let mut data_dir = std::path::PathBuf::from(&cfg.data_path);
+            if let Err(_) = std::fs::create_dir_all(&data_dir) {
+                eprintln!("Cannot access data_path '{}', falling back to default", cfg.data_path);
+                cfg.data_path = default_data_dir.to_string_lossy().to_string();
+                data_dir = default_data_dir.clone();
+                need_save = true;
+                std::fs::create_dir_all(&data_dir)?;
+            }
+
+            if need_save {
+                cfg.save(&config_path);
+            }
 
             let log_dir = data_dir.join("log");
             setup_crash_handler(&log_dir);

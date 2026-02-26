@@ -64,8 +64,40 @@ pub fn extract_domain(url: &str) -> String {
         .split(':')
         .next()
         .unwrap_or(after_scheme);
-    host.strip_prefix("www.").unwrap_or(host).to_string()
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    extract_base_domain(host)
 }
+
+fn extract_base_domain(host: &str) -> String {
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() <= 2 {
+        return host.to_lowercase();
+    }
+
+    static MULTI_PART_TLDS: &[&str] = &[
+        "co.uk", "co.jp", "co.kr", "co.nz", "co.za", "co.in", "co.id", "co.th",
+        "com.cn", "com.tw", "com.hk", "com.sg", "com.au", "com.br", "com.mx",
+        "com.ar", "com.tr", "com.ua", "com.my", "com.ph", "com.vn", "com.pk",
+        "org.cn", "org.uk", "org.au", "org.tw", "org.hk",
+        "net.cn", "net.au", "net.tw",
+        "gov.cn", "gov.uk", "gov.au",
+        "edu.cn", "edu.au", "edu.tw", "edu.hk",
+        "ac.uk", "ac.jp", "ac.kr", "ac.cn",
+    ];
+
+    let len = parts.len();
+    let last_two = format!("{}.{}", parts[len - 2], parts[len - 1]).to_lowercase();
+
+    for tld in MULTI_PART_TLDS {
+        if last_two == *tld && len >= 3 {
+            return parts[len - 3..].join(".").to_lowercase();
+        }
+    }
+
+    parts[len - 2..].join(".").to_lowercase()
+}
+
+const DOMAIN_FILTER_SQL: &str = "(source_url LIKE '%://' || ?{d} || '/%' OR source_url LIKE '%://' || ?{d} OR source_url LIKE '%://%.' || ?{d} || '/%' OR source_url LIKE '%://%.' || ?{d})";
 
 pub struct Database {
     conn: Connection,
@@ -251,11 +283,10 @@ impl Database {
             )
         } else {
             self.conn.query_row(
-                "SELECT
+                &format!("SELECT
                     SUM(CASE WHEN content_type = 'text' THEN 1 ELSE 0 END),
                     SUM(CASE WHEN content_type = 'image' THEN 1 ELSE 0 END)
-                 FROM clipboard_entries WHERE app_id = ?1
-                   AND (source_url LIKE '%://' || ?2 || '/%' OR source_url LIKE '%://www.' || ?2 || '/%' OR source_url LIKE '%://' || ?2 OR source_url LIKE '%://www.' || ?2)",
+                 FROM clipboard_entries WHERE app_id = ?1 AND {}", DOMAIN_FILTER_SQL.replace("{d}", "2")),
                 params![app_id, source_domain],
                 |row| Ok((row.get::<_, Option<i64>>(0)?.unwrap_or(0), row.get::<_, Option<i64>>(1)?.unwrap_or(0))),
             )
@@ -272,7 +303,7 @@ impl Database {
         page_size: i64,
     ) -> Result<Vec<ClipboardEntry>> {
         let base = "SELECT id, app_id, content_type, text_content, image_path, created_at, source_url, COALESCE(is_favorite,0), COALESCE(is_sensitive,0), html_content FROM clipboard_entries WHERE app_id = ?1 AND content_type = ?2";
-        let domain_filter = " AND (source_url LIKE '%://' || ?{d} || '/%' OR source_url LIKE '%://www.' || ?{d} || '/%' OR source_url LIKE '%://' || ?{d} OR source_url LIKE '%://www.' || ?{d})";
+        let domain_filter = &format!(" AND {}", DOMAIN_FILTER_SQL);
         let order = " ORDER BY is_favorite DESC, created_at DESC";
         let offset = (page - 1) * page_size;
 
@@ -419,7 +450,7 @@ impl Database {
     }
 
     pub fn delete_entries_by_domain(&self, app_id: i64, domain: &str) -> Result<Vec<String>> {
-        let filter = "(source_url LIKE '%://' || ?2 || '/%' OR source_url LIKE '%://www.' || ?2 || '/%' OR source_url LIKE '%://' || ?2 OR source_url LIKE '%://www.' || ?2)";
+        let filter = DOMAIN_FILTER_SQL.replace("{d}", "2");
         let select_q = format!(
             "SELECT image_path FROM clipboard_entries WHERE app_id = ?1 AND image_path IS NOT NULL AND {}",
             filter
