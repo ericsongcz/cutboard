@@ -405,6 +405,26 @@ fn on_clipboard_change() {
                     Ok(id) => id,
                     Err(_) => return,
                 };
+
+                // If image data is also present, save the image file alongside the text entry
+                let attached_image = if let Some(ref png_data) = content.image {
+                    let img_hash = compute_content_hash(png_data);
+                    let filename = format!(
+                        "{}_{}.png",
+                        chrono::Local::now().format("%Y%m%d_%H%M%S_%3f"),
+                        &img_hash[..8]
+                    );
+                    let images_dir = db.images_dir();
+                    let image_file = images_dir.join(&filename);
+                    if std::fs::write(&image_file, png_data).is_ok() {
+                        Some(filename)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 if db
                     .upsert_text_entry_with_html(
                         app_id,
@@ -413,6 +433,7 @@ fn on_clipboard_change() {
                         content.source_url.as_deref(),
                         content.html.as_deref(),
                         is_sensitive,
+                        attached_image.as_deref(),
                     )
                     .is_ok()
                 {

@@ -571,23 +571,23 @@ impl Database {
         )
     }
 
-    pub fn upsert_text_entry_with_html(&self, app_id: i64, text: &str, hash: &str, source_url: Option<&str>, html: Option<&str>, is_sensitive: bool) -> Result<i64> {
+    pub fn upsert_text_entry_with_html(&self, app_id: i64, text: &str, hash: &str, source_url: Option<&str>, html: Option<&str>, is_sensitive: bool, image_path: Option<&str>) -> Result<i64> {
         if let Ok(id) = self.conn.query_row(
             "SELECT id FROM clipboard_entries WHERE app_id = ?1 AND content_type = 'text' AND content_hash = ?2",
             params![app_id, hash],
             |row| row.get::<_, i64>(0),
         ) {
             self.conn.execute(
-                "UPDATE clipboard_entries SET created_at = datetime('now', 'localtime'), source_url = COALESCE(?2, source_url), html_content = COALESCE(?3, html_content) WHERE id = ?1",
-                params![id, source_url, html],
+                "UPDATE clipboard_entries SET created_at = datetime('now', 'localtime'), source_url = COALESCE(?2, source_url), html_content = COALESCE(?3, html_content), image_path = COALESCE(?4, image_path) WHERE id = ?1",
+                params![id, source_url, html, image_path],
             )?;
             return Ok(id);
         }
 
         let sensitive_val: i64 = if is_sensitive { 1 } else { 0 };
         self.conn.execute(
-            "INSERT INTO clipboard_entries (app_id, content_type, text_content, content_hash, source_url, html_content, is_sensitive) VALUES (?1, 'text', ?2, ?3, ?4, ?5, ?6)",
-            params![app_id, text, hash, source_url, html, sensitive_val],
+            "INSERT INTO clipboard_entries (app_id, content_type, text_content, content_hash, source_url, html_content, is_sensitive, image_path) VALUES (?1, 'text', ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![app_id, text, hash, source_url, html, sensitive_val, image_path],
         )?;
         Ok(self.conn.last_insert_rowid())
     }

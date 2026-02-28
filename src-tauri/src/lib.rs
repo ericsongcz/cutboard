@@ -103,6 +103,17 @@ pub fn run() {
             windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!("CutBoard"));
     }
 
+    // Redirect WebView2 user data (EBWebView) to AppData instead of exe directory
+    #[cfg(windows)]
+    {
+        if std::env::var("WEBVIEW2_USER_DATA_FOLDER").is_err() {
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                let webview_data = std::path::PathBuf::from(appdata).join("cutboard").join("EBWebView");
+                std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_data);
+            }
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {

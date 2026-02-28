@@ -3,6 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ClipboardEntry } from "../App";
 import { useTranslation } from "../i18n";
 
+const textImageCache = new Map<string, string>();
+
+function cacheTextImage(key: string, value: string) {
+  if (textImageCache.size >= 50) {
+    const firstKey = textImageCache.keys().next().value;
+    if (firstKey) textImageCache.delete(firstKey);
+  }
+  textImageCache.set(key, value);
+}
+
 interface Props {
   entries: ClipboardEntry[];
   onDelete: (id: number) => void;
@@ -16,7 +26,7 @@ const TEXT_PAGE_SIZE = 500;
 function sanitizeHtml(html: string): string {
   const div = document.createElement("div");
   div.innerHTML = html;
-  div.querySelectorAll("script,style,iframe,object,embed,form,input,link").forEach((el) => el.remove());
+  div.querySelectorAll("script,style,iframe,object,embed,form,input,link,img").forEach((el) => el.remove());
   div.querySelectorAll("*").forEach((el) => {
     for (const attr of Array.from(el.attributes)) {
       if (attr.name.startsWith("on") || attr.name === "style") {
@@ -55,6 +65,21 @@ const TextCard = memo(function TextCard({
   const [showSensitive, setShowSensitive] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
+  const [imgSrc, setImgSrc] = useState<string>(() =>
+    entry.image_path && textImageCache.has(entry.image_path) ? textImageCache.get(entry.image_path)! : ""
+  );
+  const [imgExpanded, setImgExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!entry.image_path || textImageCache.has(entry.image_path)) return;
+    invoke<string>("get_image_base64", { imagePath: entry.image_path })
+      .then((b64) => {
+        const src = `data:image/png;base64,${b64}`;
+        cacheTextImage(entry.image_path!, src);
+        setImgSrc(src);
+      })
+      .catch(() => {});
+  }, [entry.image_path]);
 
   const hasHtml = !!entry.html_content;
 
@@ -116,6 +141,17 @@ const TextCard = memo(function TextCard({
               </>
             )}
           </button>
+        </div>
+      )}
+
+      {imgSrc && !maskedText && (
+        <div className="px-3 pt-3">
+          <img
+            src={imgSrc}
+            alt=""
+            className={`rounded cursor-pointer transition-all ${imgExpanded ? "max-h-none w-full" : "max-h-32 w-auto"} object-contain`}
+            onClick={() => setImgExpanded(!imgExpanded)}
+          />
         </div>
       )}
 
